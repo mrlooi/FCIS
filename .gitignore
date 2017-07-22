@@ -81,12 +81,12 @@ target/
 *.json
 .vscode/
 
-lib/dataset/pycocotools/*.c
-lib/dataset/pycocotools/*.cpp
-lib/nms/*.c
-lib/nms/*.cpp
-lib/mask/*.c
-lib/mask/*.cpp
+#lib/dataset/pycocotools/*.c
+#lib/dataset/pycocotools/*.cpp
+#lib/nms/*.c
+#lib/nms/*.cpp
+#lib/mask/*.c
+#lib/mask/*.cpp
 
 data
 external
