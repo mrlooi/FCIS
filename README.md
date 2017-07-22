@@ -116,15 +116,10 @@ git clone https://github.com/msracver/FCIS.git
 
 ### Demo
 
-1. To run the demo with our trained model (on COCO trainval35k), please download the model manually from [OneDrive](https://1drv.ms/u/s!Am-5JzdW2XHzhqMJZmVOEDgfde8_tg), and put it under folder `model/`.
-
-	Make sure it looks like this:
-	```
-	./model/fcis_coco-0000.params
-	```
+1. To run the demo with our trained model (on COCO trainval35k), please download the model (fcis_coco-0000.params) manually from [OneDrive](https://1drv.ms/u/s!Am-5JzdW2XHzhqMJZmVOEDgfde8_tg)
 2. Run
 	```
-	python ./fcis/demo.py
+    python ./fcis/demo.py --cfg ./experiments/fcis/cfgs/fcis_coco_demo.yaml --model ./model/fcis_coco-0000.params --img_dir ./demo
 	```
 
 ### Preparation for Training & Testing
