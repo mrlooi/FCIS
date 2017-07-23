@@ -8,9 +8,6 @@
 from skimage.draw import polygon
 import numpy as np
 import cv2
-from utils.tictoc import tic, toc
-from dataset.pycocotools.mask import encode as encodeMask_c
-
 
 def encodeMask(M):
     """
@@ -41,6 +38,8 @@ def encodeMask(M):
 
 
 def mask_voc2coco(voc_masks, voc_boxes, im_height, im_width, binary_thresh = 0.4):
+    from dataset.pycocotools.mask import encode as encodeMask_c
+
     num_pred = len(voc_masks)
     assert(num_pred==voc_boxes.shape[0])
     mask_img = np.zeros((im_height, im_width, num_pred), dtype=np.uint8, order='F')

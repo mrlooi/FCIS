@@ -121,6 +121,11 @@ git clone https://github.com/msracver/FCIS.git
 	```
     python ./fcis/demo.py --cfg ./experiments/fcis/cfgs/fcis_coco_demo.yaml --model ./model/fcis_coco-0000.params --img_dir ./demo
 	```
+### Train
+1. Run (make sure to specify pretrained weights path in the config file)
+	```
+    python ./fcis/train.py --cfg ./experiments/fcis/cfgs/resnet_v1_101_vocSDS_fcis_end2end.yaml
+	```
 
 ### Preparation for Training & Testing
 

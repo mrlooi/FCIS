@@ -23,6 +23,13 @@ def load_proposal_roidb(dataset_name, image_set_name, root_path, dataset_path, r
         roidb = imdb.append_flipped_images(roidb)
     return roidb
 
+def load_labelme_gt_sdsdb(image_set_name, dataset_path, cache_path, flip=False, mask_size=21, binary_thresh=0.4, classes=[]):
+    imdb = labelme(image_set_name, dataset_path, cache_path, mask_size=mask_size, binary_thresh=binary_thresh, classes=classes)
+    sdsdb = imdb.gt_sdsdb()
+    if flip:
+        sdsdb = imdb.append_flipped_images(sdsdb)
+    return sdsdb
+
 def load_gt_sdsdb(dataset_name, image_set_name, root_path, dataset_path,
                   result_path=None, flip=False, mask_size=21, binary_thresh=0.4):
     """ load ground truth sdsdb """
