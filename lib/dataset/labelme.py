@@ -43,7 +43,7 @@ class labelme(IMDB):
         self.image_set_index = self.load_image_set_index()
 
         self.num_images = len(self.image_set_index)
-        print('num_images', self.num_images)
+        print('num_images: %d'%(self.num_images))
 
         # classes and indices
         bg_cls = '__background__'

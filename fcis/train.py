@@ -56,7 +56,7 @@ def train_net(config, output_path, logger=logging):
     #           config.TRAIN.model_prefix, config.TRAIN.begin_epoch, config.TRAIN.end_epoch,
     #           config.TRAIN.lr, config.TRAIN.lr_step)
 
-    # parameters
+    # train parameters
     pretrained_model = config.network.pretrained
     epoch = config.network.pretrained_epoch
     prefix = config.TRAIN.model_prefix
@@ -66,6 +66,10 @@ def train_net(config, output_path, logger=logging):
     lr_step = config.TRAIN.lr_step
 
     prefix = os.path.join(output_path, prefix)
+
+    # network parameters
+    BATCH_IMAGES = config.TRAIN.BATCH_IMAGES
+    SCALES = config.SCALES
 
     # gpu stuff
     ctx = [mx.gpu(int(i)) for i in config.gpus.split(',')]
@@ -80,7 +84,6 @@ def train_net(config, output_path, logger=logging):
     sym = network.get_symbol(config, is_train=True)
     feat_sym = sym.get_internals()['rpn_cls_score_output']
 
-    BATCH_IMAGES = config.TRAIN.BATCH_IMAGES
 
     # setup multi-gpu
     batch_size = len(ctx)
@@ -112,10 +115,10 @@ def train_net(config, output_path, logger=logging):
 
     # infer max shape 
     max_data_shape = [('data', (BATCH_IMAGES, 3,
-                                max([v[0] for v in config.SCALES]), max(v[1] for v in config.SCALES)))]
+                                max([v[0] for v in SCALES]), max(v[1] for v in SCALES)))]
     max_data_shape, max_label_shape = train_data.infer_shape(max_data_shape)
     max_data_shape.append(('gt_boxes', (BATCH_IMAGES, 100, 5)))
-    max_data_shape.append(('gt_masks', (BATCH_IMAGES, 100, max([v[0] for v in config.SCALES]), max(v[1] for v in config.SCALES))))
+    max_data_shape.append(('gt_masks', (BATCH_IMAGES, 100, max([v[0] for v in SCALES]), max(v[1] for v in SCALES))))
     print 'providing maximum shape', max_data_shape, max_label_shape
 
     # infer shape
