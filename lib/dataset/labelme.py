@@ -182,8 +182,8 @@ class labelme(IMDB):
             cls_idx = self.class_to_ind[cls_]
 
             e_poly = e.find('polygon')
-            e_pts = [( int(p.find('x').text), int(p.find('y').text) ) for p in e_poly.findall('pt')]
-            e_pts = np.array(e_pts)
+            e_pts = [( float(p.find('x').text), float(p.find('y').text) ) for p in e_poly.findall('pt')]
+            e_pts = np.array(e_pts).astype(np.int32)
 
             # mask
             cur_gt_mask = np.zeros((height,width, 1), dtype=np.float32)
@@ -236,7 +236,7 @@ class labelme(IMDB):
         if not os.path.exists(gt_mask_flip_file):
             hkl.dump(gt_mask[:, :, ::-1].astype('bool'), gt_mask_flip_file, mode='w', compression='gzip')
         if verbose:
-            print("Saved %s"%(gt_mask_file))
+            print("Saved mask files in %s: %s, %s"%(cache_folder, gt_mask_file, gt_mask_flip_file))
         return gt_mask_file
 
 
