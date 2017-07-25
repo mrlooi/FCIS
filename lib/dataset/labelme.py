@@ -163,7 +163,7 @@ class labelme(IMDB):
         roi_rec['height'] = float(height)
         roi_rec['width'] = float(width)
 
-        objs = [e for e in element.findall('object') if int(e.find("deleted").text) != 1]
+        objs = [e for e in element.findall('object') if int(e.find("deleted").text) != 1 and e.find('name').text.lower().strip() in self.classes]
         # if not self.config['use_diff']:
         #     non_diff_objs = [obj for obj in objs if int(obj.find('difficult').text) == 0]
         #     objs = non_diff_objs
@@ -177,8 +177,8 @@ class labelme(IMDB):
         # Load object bounding boxes into a data frame.
         for ix, e in enumerate(objs):
             cls_ = e.find('name').text.lower().strip()
-            if cls_ not in self.classes:
-                continue
+            # if cls_ not in self.classes:
+            #     continue
             cls_idx = self.class_to_ind[cls_]
 
             e_poly = e.find('polygon')
