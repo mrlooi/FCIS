@@ -1,4 +1,5 @@
 ### NOTE: THIS IS A MODIFIED REPO OF https://github.com/msracver/FCIS
+The imagenet pretrained model is located at drml@10.0.8.239:~/Documents/vincent/deep_learning/FCIS/model/pretrained_model/resnet_v1_101-0000.params
 
 
 ## Fully Convolutional Instance-aware Semantic Segmentation
