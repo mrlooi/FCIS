@@ -25,7 +25,7 @@ import xml.etree.ElementTree as ET
 from imdb import IMDB
 # from pascal_voc_eval import voc_eval, voc_eval_sds
 from ds_utils import unique_boxes, filter_small_boxes
-
+from labelme_eval import labelme_eval, labelme_eval_sds
 
 class labelme(IMDB):
     def __init__(self, image_set, data_path, cache_path, mask_size=21, binary_thresh=0.4, classes=[]):
@@ -41,6 +41,7 @@ class labelme(IMDB):
         assert os.path.exists(self.data_annotation_path), \
                 'Path does not exist: {}'.format(self.data_annotation_path)
         self.image_set_index = self.load_image_set_index()
+        self.image_index = self.image_set_index
 
         self.num_images = len(self.image_set_index)
         print('num_images: %d'%(self.num_images))
@@ -48,16 +49,12 @@ class labelme(IMDB):
         # classes and indices
         bg_cls = '__background__'
         if type(classes) == list and len(classes) > 0:
-            self.classes = [bg_cls] + [c.lower() for c in classes if c.lower() != bg_cls]
-        else:            
-            self.classes = [bg_cls] + self.get_classes()  # background always index 0
+            self.classes = [bg_cls] + sorted([c.lower() for c in classes if c.lower() != bg_cls])
+        else:
+            self.classes = [bg_cls] + sorted(self.get_classes())  # background always index 0
         self.num_classes = len(self.classes)
         self.class_to_ind = dict(zip(self.classes, xrange(self.num_classes)))
         print("classes: %s"%(self.classes))
-
-        # Default to roidb handler
-        #self._roidb_handler = self.selective_search_roidb
-        # self._roidb_handler = self.gt_roidb
 
         self.mask_size = mask_size
         self.binary_thresh = binary_thresh
@@ -99,8 +96,6 @@ class labelme(IMDB):
         """
         Load the indexes listed in this dataset's image set file.
         """
-        # Example path to image set file:
-        # self._devkit_path + /VOCdevkit2007/VOC2007/ImageSets/Main/val.txt
         img_set_path = self.data_images_path
         assert os.path.exists(img_set_path), \
                 'Path does not exist: {}'.format(img_set_path)
@@ -239,21 +234,211 @@ class labelme(IMDB):
             print("Saved mask files in %s: %s, %s"%(cache_folder, gt_mask_file, gt_mask_flip_file))
         return gt_mask_file
 
+    def get_result_dir(self):
+        return os.path.join(self.result_path, 'results')
 
-    # def gt_sdsdb(self):
-    #     """
-    #     :return:
-    #     """
-    #     cache_file = os.path.join(self.cache_path, self.name + '_gt.pkl')
-    #     if os.path.exists(cache_file):
-    #         with open(cache_file, 'rb') as fid:
-    #             sdsdb = cPickle.load(fid)
-    #         print('{} gt sdsdb loaded from {}'.format(self.name, cache_file))
-    #         return sdsdb
-    #     print('loading sbd mask annotations')
-    #     gt_sdsdb = [self.load_mask_annotations(index) for index in self.image_set_index]
-    #     with open(cache_file, 'wb') as fid:
-    #         cPickle.dump(gt_sdsdb, fid, cPickle.HIGHEST_PROTOCOL)
-    #     # for future release usage
-    #     # need to implement load sbd data
-    #     return gt_sdsdb
+    def get_result_file_template(self):#, output_dir = None):
+        """
+        """
+        # result_dir = output_dir if output_dir is not None else os.path.join(self.result_path, 'results')
+        result_dir = self.get_result_dir()
+        filedir = os.path.join(result_dir, self.image_set)
+        if not os.path.exists(filedir):
+            os.makedirs(filedir)
+        filename = 'det_' + self.image_set + '_{:s}.txt'
+        path = os.path.join(filedir, filename)
+        return path
+
+    '''DETECTION RESULTS ONLY'''
+    def evaluate_detections(self, detections):
+        """
+        top level evaluations
+        :param detections: result matrix, [bbox, confidence]
+        :return: None
+        """
+        self._write_labelme_detection_results(detections)
+        info = self.do_python_detection_eval()
+        return info
+
+    '''DETECTION RESULTS ONLY'''
+    def _write_labelme_detection_results(self, all_boxes):
+        for cls_ind, cls in enumerate(self.classes):
+            if cls == '__background__':
+                continue
+            print 'Writing {} Labelme results file'.format(cls)
+            filename = self.get_result_file_template().format(cls)
+            with open(filename, 'wt') as f:
+                for im_ind, index in enumerate(self.image_index):
+                    dets = all_boxes[cls_ind][im_ind]
+                    if dets == []:
+                        continue
+                    # the VOCdevkit expects 1-based indices
+                    for k in xrange(dets.shape[0]):
+                        f.write('{:s} {:.3f} {:.1f} {:.1f} {:.1f} {:.1f}\n'.
+                            format(index, dets[k, -1],              # filename(stem), score
+                                   dets[k, 0] + 1, dets[k, 1] + 1,  # x1, y1, x2, y2
+                                   dets[k, 2] + 1, dets[k, 3] + 1))
+
+    '''DETECTION RESULTS ONLY'''
+    def do_python_detection_eval(self):
+        """
+        python evaluation wrapper
+        :return: info_str
+        """
+        info_str = ''
+        annopath = os.path.join(self.data_annotation_path, '{:s}.xml')
+        cachedir = os.path.join(self.cache_path, self.name)
+        # The PASCAL VOC metric changed in 2010
+        # use_07_metric = True if self.year == 'SDS' or int(self.year) < 2010 else False
+        use_07_metric = False
+        print 'VOC07 metric? ' + ('Y' if use_07_metric else 'No')
+        info_str += 'VOC07 metric? ' + ('Y' if use_07_metric else 'No')
+        info_str += '\n'
+
+        # AP@0.5
+        ovthresh = 0.5
+        aps = []
+        for cls_ind, cls in enumerate(self.classes):
+            if cls == '__background__':
+                continue
+            filename = self.get_result_file_template().format(cls)
+            rec, prec, ap = labelme_eval(
+                                filename, annopath, self.image_index, cls, cachedir, ovthresh=ovthresh,
+                                use_07_metric=use_07_metric)
+            aps += [ap]
+            print('AP for {} = {:.4f}'.format(cls, ap))
+            info_str += 'AP for {} = {:.4f}\n'.format(cls, ap)
+        print('Mean AP@{:.1f} = {:.4f}'.format(ovthresh, np.mean(aps)))
+        info_str += 'Mean AP@{:.1f} = {:.4f}\n\n'.format(ovthresh, np.mean(aps))
+
+        # AP@0.7
+        ovthresh = 0.7
+        aps = []
+        for cls_ind, cls in enumerate(self.classes):
+            if cls == '__background__':
+                continue
+            filename = self.get_result_file_template().format(cls)
+            rec, prec, ap = labelme_eval(
+                                filename, annopath, self.image_index, cls, cachedir, ovthresh=ovthresh,
+                                use_07_metric=use_07_metric)
+            aps += [ap]
+            print('AP for {} = {:.4f}'.format(cls, ap))
+            info_str += 'AP for {} = {:.4f}\n'.format(cls, ap)
+        print('Mean AP@{:.1f} = {:.4f}'.format(ovthresh, np.mean(aps)))
+        info_str += 'Mean AP@{:.1f} = {:.4f}\n\n'.format(ovthresh, np.mean(aps))
+
+        return info_str
+
+
+    '''SEGMENTATION RESULTS'''
+    def evaluate_sds(self, all_boxes, all_masks):
+        result_dir = os.path.join(self.get_result_dir(), self.name)
+        if not os.path.exists(result_dir):
+            os.makedirs(result_dir)
+
+        det_results_file_format = os.path.join(result_dir, "%s_det.pkl") # %s is cls
+        seg_results_file_format = os.path.join(result_dir, "%s_seg.pkl") # %s is cls
+
+        self._write_seg_results_file(all_boxes, all_masks, det_results_file_format, seg_results_file_format)
+        info = self._py_evaluate_segmentation(det_results_file_format, seg_results_file_format)
+        return info
+
+    '''SEGMENTATION RESULTS'''
+    def _write_seg_results_file(self, all_boxes, all_masks, det_results_file_format, seg_results_file_format):
+        """
+        Write results as a pkl file, note this is different from
+        detection task since it's difficult to write masks to txt
+        """
+        # Always reformat result in case of sometimes masks are not
+        # binary or is in shape (n, sz*sz) instead of (n, sz, sz)
+
+        all_boxes, all_masks = self._reformat_result(all_boxes, all_masks)
+        for cls_inds, cls in enumerate(self.classes):
+            if cls == '__background__':
+                continue
+            det_results_file = det_results_file_format%(cls)
+            seg_results_file = seg_results_file_format%(cls)
+            print('Writing %s results file: %s, %s'%(cls, det_results_file, seg_results_file))
+            # print filename
+            with open(det_results_file, 'wb') as f:
+                cPickle.dump(all_boxes[cls_inds], f, cPickle.HIGHEST_PROTOCOL)
+            with open(seg_results_file, 'wb') as f:
+                cPickle.dump(all_masks[cls_inds], f, cPickle.HIGHEST_PROTOCOL)
+
+    '''SEGMENTATION RESULTS'''
+    def _reformat_result(self, boxes, masks):
+        num_images = self.num_images
+        num_class = len(self.classes)
+        reformat_masks = [[[] for _ in xrange(num_images)]
+                          for _ in xrange(num_class)]
+        for cls_inds in xrange(1, num_class):  # ignore bg class
+            for img_inds in xrange(num_images):
+                if len(masks[cls_inds][img_inds]) == 0:
+                    continue
+                num_inst = masks[cls_inds][img_inds].shape[0]
+                reformat_masks[cls_inds][img_inds] = masks[cls_inds][img_inds]\
+                    .reshape(num_inst, self.mask_size, self.mask_size)
+                # reformat_masks[cls_inds][img_inds] = reformat_masks[cls_inds][img_inds] >= 0.4
+        all_masks = reformat_masks
+        return boxes, all_masks
+
+    '''SEGMENTATION RESULTS'''
+    def _py_evaluate_segmentation(self, det_results_file_format, seg_results_file_format):
+        info_str = ''
+
+        annot_dir = self.data_annotation_path
+        cache_dir = os.path.join(self.cache_path, self.name)
+        output_dir = self.get_result_dir()
+        # The PASCAL VOC metric changed in 2010
+        # use_07_metric = True if self.year == 'SDS' or int(self.year) < 2010 else False
+
+        # define this as true according to SDS's evaluation protocol
+        use_07_metric = True
+        print 'VOC07 metric? ' + ('Y' if use_07_metric else 'No')
+        info_str += 'VOC07 metric? ' + ('Y' if use_07_metric else 'No')
+        info_str += '\n'
+
+        # AP@0.5
+        ovthresh = 0.5
+        aps = []
+        print ('~~~~~~ Evaluation use min overlap = %.1f ~~~~~~'%(ovthresh))
+        info_str += '~~~~~~ Evaluation use min overlap = %.1f ~~~~~~'%(ovthresh)
+        info_str += '\n'
+
+        # det, seg filenames
+
+        for i, cls in enumerate(self.classes):
+            if cls == '__background__':
+                continue
+            det_results_file = det_results_file_format%(cls) 
+            seg_results_file = seg_results_file_format%(cls)
+            ap = labelme_eval_sds(det_results_file, seg_results_file, annot_dir,
+                                  self.image_index, cls, cache_dir, self.classes, self.mask_size, self.binary_thresh, ov_thresh=ovthresh)
+            aps += [ap]
+            print('AP for {} = {:.2f}'.format(cls, ap*100))
+            info_str += 'AP for {} = {:.2f}\n'.format(cls, ap*100)
+        print('Mean AP@{:.1f} = {:.2f}'.format(ovthresh, np.mean(aps)*100))
+        info_str += 'Mean AP@{:.1f} = {:.2f}\n'.format(ovthresh, np.mean(aps)*100)
+
+        # AP@0.7
+        ovthresh = 0.7
+        aps = []
+        print ('~~~~~~ Evaluation use min overlap = %.1f ~~~~~~'%(ovthresh))
+        info_str += '~~~~~~ Evaluation use min overlap = %.1f ~~~~~~'%(ovthresh)
+        info_str += '\n'
+        for i, cls in enumerate(self.classes):
+            if cls == '__background__':
+                continue
+            det_results_file = det_results_file_format%(cls) 
+            seg_results_file = seg_results_file_format%(cls)
+            ap = labelme_eval_sds(det_results_file, seg_results_file, annot_dir,
+                                  self.image_index, cls, cache_dir, self.classes, self.mask_size, self.binary_thresh, ov_thresh=ovthresh)
+            aps += [ap]
+            print('AP for {} = {:.2f}'.format(cls, ap*100))
+            info_str += 'AP for {} = {:.2f}\n'.format(cls, ap*100)
+        print('Mean AP@{:.1f} = {:.2f}'.format(ovthresh, np.mean(aps)*100))
+        info_str += 'Mean AP@{:.1f} = {:.2f}\n'.format(ovthresh, np.mean(aps)*100)
+
+        print("\n********SUMMARY********\n")
+        print(info_str)
+        return info_str

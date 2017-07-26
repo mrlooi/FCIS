@@ -96,6 +96,7 @@ def pred_eval(predictor, test_data, imdb, cfg, vis=False, thresh=1e-3, logger=No
 
         idx = 0
         t = time.time()
+
         for data_batch in test_data:
             t1 = time.time() - t
             t = time.time()
@@ -131,6 +132,8 @@ def pred_eval(predictor, test_data, imdb, cfg, vis=False, thresh=1e-3, logger=No
                     masks = masks[:, 1:, :, :]
                     im_height = np.round(im_shapes[delta][0] / scales[delta]).astype('int')
                     im_width = np.round(im_shapes[delta][1] / scales[delta]).astype('int')
+                    # print(im_height)
+                    # print(im_width)
                     boxes = clip_boxes(boxes, (im_height, im_width))
                     result_mask, result_box = mask_voting(masks, boxes, scores, imdb.num_classes,
                                                           max_per_image, im_width, im_height,
@@ -149,9 +152,10 @@ def pred_eval(predictor, test_data, imdb, cfg, vis=False, thresh=1e-3, logger=No
             t3 = time.time() - t
             t = time.time()
 
-            print 'testing {}/{} data {:.4f}s net {:.4f}s post {:.4f}s'.format(idx, imdb.num_images, t1, t2, t3)
+            msg_ = 'testing {}/{} data {:.4f}s net {:.4f}s post {:.4f}s'.format(idx, imdb.num_images, t1, t2, t3)
+            print(msg_)
             if logger:
-                logger.info('testing {}/{} data {:.4f}s net {:.4f}s post {:.4f}s'.format(idx, imdb.num_images, t1, t2, t3))
+                logger.info(msg_)
             
         with open(det_file, 'wb') as f:
             cPickle.dump(all_boxes, f, protocol=cPickle.HIGHEST_PROTOCOL)
