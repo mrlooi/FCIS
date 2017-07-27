@@ -132,7 +132,7 @@ def get_resized_interpolated_pts(poly_pts, h, w, th, tw):
 
 	return resize_inter_pts
 
-def updateETTree(ET_obj, output_file, poly_pts, h, w):
+def updateETTree(ET_obj, output_file, poly_cls, poly_pts, h, w):
 	element = ET_obj.getroot()
 
 	# reset the height and width
@@ -160,6 +160,7 @@ def updateETTree(ET_obj, output_file, poly_pts, h, w):
 	for i, p_ in enumerate(poly_pts):
 		e = element_objects[i]
 		e_poly = e.find('polygon')
+		e.find('name').text = poly_cls[i]
 		for pt_ in p_:
 			elem_pt_x = ET.Element("x")
 			elem_pt_y = ET.Element("y")
@@ -176,7 +177,7 @@ def updateETTree(ET_obj, output_file, poly_pts, h, w):
 if __name__ == '__main__':
 	import glob
 	import os
-	import os.path as osp
+	import os.path as osp 
 
 	labelme_root = "/home/vincent/LabelMe"
 	image_set = 'singulation_test'
@@ -220,11 +221,15 @@ if __name__ == '__main__':
 		element_objects = [e for e in element.findall('object') if int(e.find("deleted").text) != 1]
 
 		e_pts_all = []
+		e_cls = []
 		for e in element_objects:
 			# if int(e.find('deleted').text) == 1:
 			# 	continue
 			# print(e.find('name').text)
 			e_poly = e.find('polygon')
+			cls = e.find('name').text
+			e_cls.append(cls)
+
 			e_pts = [( float(p.find('x').text), float(p.find('y').text) ) for p in e_poly.findall('pt')]
 			e_pts = np.array(e_pts).astype(np.int32)
 			e_pts_all.append(e_pts)
@@ -239,4 +244,4 @@ if __name__ == '__main__':
 
 		# save annot
 		annot_file_new = osp.join(annot_dir_new, img_names[ix] + ".xml")
-		updateETTree(et, annot_file_new, resized_pts, TARGET_HEIGHT, TARGET_WIDTH)
+		updateETTree(et, annot_file_new, e_cls, resized_pts, TARGET_HEIGHT, TARGET_WIDTH)
