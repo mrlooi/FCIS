@@ -217,7 +217,7 @@ if __name__ == '__main__':
 		# element_file = element.find('filename')
 		# element_img_sz = element.find('imagesize')
 		
-		element_objects = element.findall('object')
+		element_objects = [e for e in element.findall('object') if int(e.find("deleted").text) != 1]
 
 		e_pts_all = []
 		for e in element_objects:
