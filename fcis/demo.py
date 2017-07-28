@@ -39,6 +39,84 @@ from mask.mask_transform import gpu_mask_voting, cpu_mask_voting
 
 from utils.image import resize, transform
 
+class DataBatchWrapper(object):
+
+    def __init__(self, target_size, max_size, image_stride, pixel_means, data_names = ['data', 'im_info'], label_names = []):
+        self.target_size = target_size
+        self.max_size = max_size
+        self.image_stride = image_stride
+        self.pixel_means = pixel_means
+
+        self.data_names = data_names
+        self.label_names = label_names
+        pass
+
+    def get_data_tensor_info(self, im):
+        im_, im_scale = resize(im, self.target_size, self.max_size, stride=self.image_stride)
+        im_tensor = transform(im_, self.pixel_means)
+        im_info = np.array([[im_tensor.shape[2], im_tensor.shape[3], im_scale]], dtype=np.float32)
+        data_tensor_info = [mx.nd.array(im_tensor), mx.nd.array(im_info)]
+        
+        return data_tensor_info
+
+    def get_data_batch(self, im):
+        data_tensor_info = self.get_data_tensor_info(im)
+        data_batch = mx.io.DataBatch(data=[data_tensor_info], label=[], pad=0, 
+                                             provide_data=[[(k, v.shape) for k, v in zip(self.data_names, data_tensor_info)]],
+                                             provide_label=[None])
+        return data_batch
+
+def inference(predictor, data_batch, data_names, num_classes, BINARY_THRESH = 0.4, CONF_THRESH=0.7, gpu_id=0):
+    scales = [data_batch.data[i][1].asnumpy()[0, 2] for i in xrange(len(data_batch.data))]
+    im_shapes = [data_batch.data[i][0].shape[2:4] for i in xrange(len(data_batch.data))]
+
+    scores, boxes, masks, data_dict = im_detect(predictor, data_batch, data_names, scales, config)
+    if not config.TEST.USE_MASK_MERGE:
+        all_boxes = [[] for _ in xrange(num_classes)]
+        all_masks = [[] for _ in xrange(num_classes)]
+        nms = py_nms_wrapper(config.TEST.NMS)
+        for j in range(1, num_classes):
+            indexes = np.where(scores[0][:, j] > CONF_THRESH)[0]
+            cls_scores = scores[0][indexes, j, np.newaxis]
+            cls_masks = masks[0][indexes, 1, :, :]
+            # try:
+            #     if config.CLASS_AGNOSTIC:
+            #         cls_boxes = boxes[0][indexes, :]
+            #     else:
+            #         raise Exception()
+            # except:
+            if config.CLASS_AGNOSTIC:
+                cls_boxes = boxes[0][indexes, :]
+            else:
+                cls_boxes = boxes[0][indexes, j * 4:(j + 1) * 4]
+
+            cls_dets = np.hstack((cls_boxes, cls_scores))
+            keep = nms(cls_dets)
+            all_boxes[j] = cls_dets[keep, :]
+            all_masks[j] = cls_masks[keep, :]
+        dets = [all_boxes[j] for j in range(1, num_classes)]
+        masks = [all_masks[j] for j in range(1, num_classes)]
+    else:
+        masks = masks[0][:, 1:, :, :]
+        im_height = np.round(im_shapes[0][0] / scales[0]).astype('int')
+        im_width = np.round(im_shapes[0][1] / scales[0]).astype('int')
+        # print (im_height, im_width)
+        boxes = clip_boxes(boxes[0], (im_height, im_width))
+        result_masks, result_dets = gpu_mask_voting(masks, boxes, scores[0], num_classes,
+                                                    100, im_width, im_height,
+                                                    config.TEST.NMS, config.TEST.MASK_MERGE_THRESH,
+                                                    BINARY_THRESH, gpu_id)
+
+        dets = [result_dets[j] for j in range(1, num_classes)]
+        masks = [result_masks[j][:, 0, :, :] for j in range(1, num_classes)]
+
+    for i in xrange(len(dets)):
+        keep = np.where(dets[i][:,-1] > CONF_THRESH)
+        dets[i] = dets[i][keep]
+        masks[i] = masks[i][keep]
+
+    return dets, masks
+
 def parse_args():
     """Parse input arguments."""
     parser = argparse.ArgumentParser(description='Faster R-CNN demo')
@@ -48,6 +126,8 @@ def parse_args():
                         required=True, type=str)
     parser.add_argument('--img_dir', dest='img_dir', help='path to directory of images for demo',
                         required=True, type=str)
+    parser.add_argument('--min_score', dest='min_score', help='Minimum score. Default 0.85',
+                            default=0.85, type=float)
 
     args = parser.parse_args()
 
@@ -60,6 +140,12 @@ def main():
     # load image demo directory
     img_dir = args.img_dir
     assert osp.exists(img_dir), ("Could not find image directory %s"%(img_dir))
+
+    image_names = glob.glob(osp.join(img_dir,"*"))
+
+    if len(image_names) == 0:
+        print("No files in %s"%(img_dir))
+        return
 
     # load config
     cfg_path = args.cfg_file
@@ -85,94 +171,49 @@ def main():
     sym_instance = eval(config.symbol)()
     sym = sym_instance.get_symbol(config, is_train=False)
 
-    # load demo data
-    image_names = glob.glob(osp.join(img_dir,"*"))
 
-    data = []
-    for im_name in image_names:
-        # assert osp.exists(im_name), ('%s does not exist'%(im_name))
-        im = cv2.imread(im_name, cv2.IMREAD_COLOR)# | cv2.IMREAD_IGNORE_ORIENTATION)
-        target_size = config.SCALES[0][0]
-        max_size = config.SCALES[0][1]
-        im, im_scale = resize(im, target_size, max_size, stride=config.network.IMAGE_STRIDE)
-        im_tensor = transform(im, config.network.PIXEL_MEANS)
-        im_info = np.array([[im_tensor.shape[2], im_tensor.shape[3], im_scale]], dtype=np.float32)
-        data.append({'data': im_tensor, 'im_info': im_info})
-
-    # get predictor
+    # key parameters
     data_names = ['data', 'im_info']
     label_names = []
-    data = [[mx.nd.array(data[i][name]) for name in data_names] for i in xrange(len(data))]
     max_data_shape = [[('data', (1, 3, max([v[0] for v in config.SCALES]), max([v[1] for v in config.SCALES])))]]
-    provide_data = [[(k, v.shape) for k, v in zip(data_names, data[i])] for i in xrange(len(data))]
-    provide_label = [None for i in xrange(len(data))]
-    # load model
+
+    target_size = config.SCALES[0][0]
+    max_size = config.SCALES[0][1]
+
+    data_batch_wr = DataBatchWrapper(target_size, max_size, image_stride=config.network.IMAGE_STRIDE, 
+                          pixel_means=config.network.PIXEL_MEANS, data_names=data_names, label_names=label_names)
+
+    im = np.zeros((target_size,max_size,3))
+    data_tensor_info = data_batch_wr.get_data_tensor_info(im)
+
+    # get predictor
     predictor = Predictor(sym, data_names, label_names,
                           context=[mx.gpu(ctx_id[0])], max_data_shapes=max_data_shape,
-                          provide_data=provide_data, provide_label=provide_label,
+                          provide_data=[[(k, v.shape) for k, v in zip(data_names, data_tensor_info)]], provide_label=[None],
                           arg_params=arg_params, aux_params=aux_params)
 
-    # warm up
+    # # warm up predictor
     for i in xrange(2):
-        data_batch = mx.io.DataBatch(data=[data[0]], label=[], pad=0, index=0,
-                                     provide_data=[[(k, v.shape) for k, v in zip(data_names, data[0])]],
+        data_batch = mx.io.DataBatch(data=[data_tensor_info], label=[], pad=0, index=0,
+                                     provide_data=[[(k, v.shape) for k, v in zip(data_names, data_tensor_info)]],
                                      provide_label=[None])
         scales = [data_batch.data[i][1].asnumpy()[0, 2] for i in xrange(len(data_batch.data))]
         _, _, _, _ = im_detect(predictor, data_batch, data_names, scales, config)
 
-    # test
+    # test: run predictions
+    CONF_THRESH = args.min_score
+    print("Using min score of %.3f...\n"%(CONF_THRESH))
+
     for idx, im_name in enumerate(image_names):
-        data_batch = mx.io.DataBatch(data=[data[idx]], label=[], pad=0, index=idx,
-                                     provide_data=[[(k, v.shape) for k, v in zip(data_names, data[idx])]],
-                                     provide_label=[None])
-        scales = [data_batch.data[i][1].asnumpy()[0, 2] for i in xrange(len(data_batch.data))]
+        im = cv2.imread(im_name, cv2.IMREAD_COLOR)# | cv2.IMREAD_IGNORE_ORIENTATION)
+        # im_copy = im.copy()
+        
+        data_batch = data_batch_wr.get_data_batch(im)
 
         tic()
-        scores, boxes, masks, data_dict = im_detect(predictor, data_batch, data_names, scales, config)
-        im_shapes = [data_batch.data[i][0].shape[2:4] for i in xrange(len(data_batch.data))]
-
-        if not config.TEST.USE_MASK_MERGE:
-            all_boxes = [[] for _ in xrange(num_classes)]
-            all_masks = [[] for _ in xrange(num_classes)]
-            nms = py_nms_wrapper(config.TEST.NMS)
-            for j in range(1, num_classes):
-                indexes = np.where(scores[0][:, j] > 0.7)[0]
-                cls_scores = scores[0][indexes, j, np.newaxis]
-                cls_masks = masks[0][indexes, 1, :, :]
-                try:
-                    if config.CLASS_AGNOSTIC:
-                        cls_boxes = boxes[0][indexes, :]
-                    else:
-                        raise Exception()
-                except:
-                    cls_boxes = boxes[0][indexes, j * 4:(j + 1) * 4]
-
-                cls_dets = np.hstack((cls_boxes, cls_scores))
-                keep = nms(cls_dets)
-                all_boxes[j] = cls_dets[keep, :]
-                all_masks[j] = cls_masks[keep, :]
-            dets = [all_boxes[j] for j in range(1, num_classes)]
-            masks = [all_masks[j] for j in range(1, num_classes)]
-        else:
-            masks = masks[0][:, 1:, :, :]
-            im_height = np.round(im_shapes[0][0] / scales[0]).astype('int')
-            im_width = np.round(im_shapes[0][1] / scales[0]).astype('int')
-            print (im_height, im_width)
-            boxes = clip_boxes(boxes[0], (im_height, im_width))
-            result_masks, result_dets = gpu_mask_voting(masks, boxes, scores[0], num_classes,
-                                                        100, im_width, im_height,
-                                                        config.TEST.NMS, config.TEST.MASK_MERGE_THRESH,
-                                                        config.BINARY_THRESH, ctx_id[0])
-
-            dets = [result_dets[j] for j in range(1, num_classes)]
-            masks = [result_masks[j][:, 0, :, :] for j in range(1, num_classes)]
-        print('testing {} {:.4f}s'.format(im_name, toc()))
-        # visualize
-        for i in xrange(len(dets)):
-            keep = np.where(dets[i][:,-1]>0.7)
-            dets[i] = dets[i][keep]
-            masks[i] = masks[i][keep]
-        im = cv2.imread(im_name)
+        dets, masks = inference(predictor, data_batch, data_names, num_classes, config.BINARY_THRESH, CONF_THRESH, gpu_id=ctx_id[0])
+        print('inference time {:s}: {:.4f}s'.format(im_name, toc()))
+        # im = cv2.imread(im_name)
         show_masks(im, dets, masks, CLASSES, config.BINARY_THRESH)
 
     print 'done'
