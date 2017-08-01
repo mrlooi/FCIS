@@ -50,6 +50,7 @@ from cv_bridge import CvBridge, CvBridgeError
 from vision.srv import _Detection2
 from vision.msg import DetectionData
 
+RED = (0,0,255)
 
 class RosFCISPredictor(object):
     def __init__(self, predictor, data_batch_wrapper, classes, min_score=0.85, publish=False, ctx_id=[0]):
@@ -108,9 +109,11 @@ class RosFCISPredictor(object):
                         if len(bbox) != 4:
                             continue
                         cnt = d['contours']
+                        score = d['score']
                         # self.current_max_bbox = bbox
                         bbox_top_pt = (int(bbox[0]),int(bbox[1]))
                         cv2.rectangle(img_copy, bbox_top_pt, (int(bbox[2]),int(bbox[3])), cls_color, 3)
+                        cv2.putText(img_copy, "Score: %.3f, %s"%(score, cls), bbox_top_pt, cv2.FONT_HERSHEY_SIMPLEX, 0.8, RED, 2)
                         cv2.drawContours(img_copy,[cnt],0,cls_color,2)
                 self.image_pub.publish(self.bridge.cv2_to_imgmsg(img_copy, "bgr8"))
                 cv2.imshow("bounding boxes", img_copy)
@@ -194,7 +197,7 @@ class RosFCISPredictor(object):
 
 def parse_args():
     """Parse input arguments."""
-    parser = argparse.ArgumentParser(description='Faster R-CNN demo')
+    parser = argparse.ArgumentParser(description='FCIS ROS demo')
     parser.add_argument('--cfg', dest='cfg_file', help='required config file (YAML file)', 
                         required=True, type=str)
     parser.add_argument('--model', dest='model', help='path to trained model (.params file)',
@@ -202,7 +205,7 @@ def parse_args():
     parser.add_argument('--publish', dest='publish', 
                         help='Publish segmentation results for each frame ',
                         action='store_true')
-    parser.add_argument('--min_score', dest='min_score', help='Minimum score. Default 0.85',
+    parser.add_argument('--min_score', dest='min_score', help='Minimum score for detections. Default 0.85',
                             default=0.85, type=float)
 
     args = parser.parse_args()
