@@ -52,6 +52,16 @@ from vision.msg import DetectionData
 
 RED = (0,0,255)
 
+def normalize_luminance(img):
+    # convert to YUV colorspace to normalize luminance by performing hist equalization on Y channel
+    image_yuv = cv2.cvtColor(img, cv2.COLOR_BGR2YUV)
+    image_yuv[:, :, 0] = cv2.equalizeHist(image_yuv[:, :, 0]) 
+
+    # convert YUV back to RGB
+    image = cv2.cvtColor(image_yuv, cv2.COLOR_YUV2BGR)
+
+    return image
+
 class RosFCISPredictor(object):
     def __init__(self, predictor, data_batch_wrapper, classes, min_score=0.85, publish=False, ctx_id=[0]):
         if type(ctx_id) != list:
@@ -117,10 +127,10 @@ class RosFCISPredictor(object):
                         cv2.drawContours(img_copy,[cnt],0,cls_color,2)
                 self.image_pub.publish(self.bridge.cv2_to_imgmsg(img_copy, "bgr8"))
                 cv2.imshow("bounding boxes", img_copy)
+                cv2.waitKey(1)
             except CvBridgeError as e:
                 print("[ERROR] CvBridgeError: %s"%e)
 
-        cv2.waitKey(1)
         
     def callback_service(self, req):
         detection_items = []
