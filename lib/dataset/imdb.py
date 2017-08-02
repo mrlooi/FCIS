@@ -208,8 +208,23 @@ class IMDB(object):
             boxes = roi_rec['boxes'].copy()
             oldx1 = boxes[:, 0].copy()
             oldx2 = boxes[:, 2].copy()
+            #boxes[:, 0] = roi_rec['width'] - oldx2 - 1
+            #boxes[:, 2] = roi_rec['width'] - oldx1 - 1
+
+            #new
+            boxes = boxes.astype(np.int)
             boxes[:, 0] = roi_rec['width'] - oldx2 - 1
             boxes[:, 2] = roi_rec['width'] - oldx1 - 1
+            idx=boxes < 0
+            boxes[idx] = 0
+            boxes = boxes.astype(np.uint16)
+            #end
+
+            # if not (boxes[:, 2] >= boxes[:, 0]).all():
+            #     print "index", i
+            #     print "failed image location", roi_rec['image']
+            #     for a in range(len(boxes)):
+            #         print boxes[a, 2], boxes[a, 0]
             assert (boxes[:, 2] >= boxes[:, 0]).all()
             entry = {'image': roi_rec['image'],
                      'height': roi_rec['height'],
