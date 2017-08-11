@@ -18,9 +18,6 @@ import random
 import cv2
 import numpy as np
 # get config
-os.environ['PYTHONUNBUFFERED'] = '1'
-os.environ['MXNET_CUDNN_AUTOTUNE_DEFAULT'] = '0'
-os.environ['MXNET_ENABLE_GPU_P2P'] = '0'
 
 from config.config import config, update_config
 cur_path = os.path.abspath(os.path.dirname(__file__))
@@ -39,7 +36,7 @@ from nms.nms import py_nms_wrapper
 from mask.mask_transform import gpu_mask_voting, cpu_mask_voting
 
 from utils.image import resize, transform
-from demo import DataBatchWrapper, inference
+from demo import DataBatchWrapper, inference, reformat_data
 
 # ros stuff
 import rospy
@@ -153,37 +150,7 @@ class RosFCISPredictor(object):
         dets, masks = inference(self.predictor, data_batch, self.data_batch_wr.data_names, len(self.classes), BINARY_THRESH=config.BINARY_THRESH, CONF_THRESH=self.min_score, gpu_id=self.ctx_id[0])
         print('inference time: {:.4f}s'.format(toc()))
 
-        data = self.reformat_data(dets, masks)
-        return data
-
-    def reformat_data(self, dets, masks):
-        data = {}
-
-        for cls_ix, cls in enumerate([c for c in self.classes if c.lower() != "__background__"]): # ignore bg class
-            cls_dets = dets[cls_ix]
-            cls_masks = masks[cls_ix]
-            data[cls] = []
-            for ix, bbox in enumerate(cls_dets):
-                pred_score = bbox[-1]
-                pred_box = np.round(bbox[:4]).astype(np.int32)
-                pred_mask = cls_masks[ix]
-
-                mask_w = pred_box[2] - pred_box[0] + 1
-                mask_h = pred_box[3] - pred_box[1] + 1
-
-                # reshape mask 
-                pred_mask = cv2.resize(pred_mask.astype(np.float32), (mask_w, mask_h))
-                pred_mask = pred_mask >= config.BINARY_THRESH
-
-                # find mask contours
-                m = pred_mask.astype(np.uint8)
-                m[m==1] *= 255
-                cnt, _ = cv2.findContours(m,cv2.RETR_TREE,cv2.CHAIN_APPROX_SIMPLE)
-                cnt = cnt[0]
-                cnt += pred_box[:2]
-
-                data[cls].append({'score': pred_score, 'bbox': pred_box, 'mask': pred_mask, 'contours': cnt})
-
+        data = reformat_data(dets, masks, self.classes)
         return data
 
     def _format_detection_response(self, detection_data):

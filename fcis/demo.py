@@ -16,10 +16,9 @@ import logging
 import pprint
 import cv2
 import numpy as np
+import json
+
 # get config
-os.environ['PYTHONUNBUFFERED'] = '1'
-os.environ['MXNET_CUDNN_AUTOTUNE_DEFAULT'] = '0'
-os.environ['MXNET_ENABLE_GPU_P2P'] = '0'
 
 from config.config import config, update_config
 cur_path = os.path.abspath(os.path.dirname(__file__))
@@ -117,9 +116,57 @@ def inference(predictor, data_batch, data_names, num_classes, BINARY_THRESH = 0.
 
     return dets, masks
 
+def reformat_data(dets, masks, classes):
+    data = {}
+
+    for cls_ix, cls in enumerate([c for c in classes if c.lower() != "__background__"]): # ignore bg class
+        cls_dets = dets[cls_ix]
+        cls_masks = masks[cls_ix]
+        data[cls] = []
+        for ix, bbox in enumerate(cls_dets):
+            pred_score = bbox[-1]
+            pred_box = np.round(bbox[:4]).astype(np.int32)
+            pred_mask = cls_masks[ix]
+
+            mask_w = pred_box[2] - pred_box[0] + 1
+            mask_h = pred_box[3] - pred_box[1] + 1
+
+            # reshape mask 
+            pred_mask = cv2.resize(pred_mask.astype(np.float32), (mask_w, mask_h))
+            pred_mask = pred_mask >= config.BINARY_THRESH
+
+            # find mask contours
+            m = pred_mask.astype(np.uint8)
+            m[m==1] *= 255
+            cnt, _ = cv2.findContours(m,cv2.RETR_TREE,cv2.CHAIN_APPROX_SIMPLE)
+            cnt = cnt[0]
+            cnt += pred_box[:2]
+
+            data[cls].append({'score': pred_score, 'bbox': pred_box, 'mask': pred_mask, 'contours': cnt})
+
+    return data
+
+def write_reformat_data_json(reformatted_data, json_path):
+    '''must have data structure returned from reformat_data function'''
+    data = []
+    for cls,cls_data in reformatted_data.items():
+        for d in cls_data:
+            bbox = d['bbox']
+            if len(bbox) != 4:
+                continue     
+            cnt = d['contours'].squeeze()
+            # print(cnt.shape)
+            # bbox = list(bbox)
+            cnt = cnt.reshape(cnt.shape[0]*cnt.shape[1])
+            ddd = {'type': cls,'score': float(d['score']),'bbox':bbox.tolist(),'contours':cnt.tolist()}
+            data.append(ddd)
+    with open(json_path, 'w') as f:
+        json.dump(data, f)
+    print("Saved to %s"%(json_path))
+
 def parse_args():
     """Parse input arguments."""
-    parser = argparse.ArgumentParser(description='Faster R-CNN demo')
+    parser = argparse.ArgumentParser(description='FCIS demo')
     parser.add_argument('--cfg', dest='cfg_file', help='required config file (YAML file)', 
                         required=True, type=str)
     parser.add_argument('--model', dest='model', help='path to trained model (.params file)',
@@ -128,6 +175,10 @@ def parse_args():
                         required=True, type=str)
     parser.add_argument('--min_score', dest='min_score', help='Minimum score. Default 0.85',
                             default=0.85, type=float)
+    parser.add_argument('--save', dest='save', help='Saves inference data per image as JSON files (stored in img_dir directory)',
+                         action='store_true')
+    parser.add_argument('--novis', dest='novis', help='Turn off visualization of inference',
+                         action='store_true')
 
     args = parser.parse_args()
 
@@ -206,6 +257,9 @@ def main():
 
     for idx, im_name in enumerate(image_names):
         im = cv2.imread(im_name, cv2.IMREAD_COLOR)# | cv2.IMREAD_IGNORE_ORIENTATION)
+        if im is None:
+            print("Could not read %s"%(im_name))
+            continue
         # im_copy = im.copy()
         
         data_batch = data_batch_wr.get_data_batch(im)
@@ -214,9 +268,20 @@ def main():
         dets, masks = inference(predictor, data_batch, data_names, num_classes, config.BINARY_THRESH, CONF_THRESH, gpu_id=ctx_id[0])
         print('inference time {:s}: {:.4f}s'.format(im_name, toc()))
         # im = cv2.imread(im_name)
-        show_masks(im, dets, masks, CLASSES, config.BINARY_THRESH)
 
-    print 'done'
+
+        reformatted_data = reformat_data(dets, masks, CLASSES)
+
+        if args.save:
+            im_name_basename = im_name[:im_name.rfind('.')]
+            json_file = osp.join(img_dir, im_name_basename + ".json")
+            write_reformat_data_json(reformatted_data, json_file)
+
+        # vis
+        if not args.novis:
+            show_masks(im, dets, masks, CLASSES, config.BINARY_THRESH)
+
+    print('\nDONE\n')
 
 if __name__ == '__main__':
     # python ./fcis/demo.py --cfg ./experiments/fcis/cfgs/fcis_coco_demo.yaml --model ./model/fcis_coco-0000.params --img_dir ./demo
