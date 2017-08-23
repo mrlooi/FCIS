@@ -11,6 +11,7 @@ The imagenet pretrained model is located at drml@10.0.8.239:~/Documents/vincent/
 	sudo pip install hickle
 	```
 2. Custom installation (for Dorabot -> must have cuda 8 installed)
+	Assumes CUDA and CUDNN are installed in /usr, as per DD's environment installation script
 	```
 	cd $(FCIS);
 	sudo ln -s /usr/lib /usr/lib64;
