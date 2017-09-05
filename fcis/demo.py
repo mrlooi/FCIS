@@ -38,6 +38,10 @@ from mask.mask_transform import gpu_mask_voting, cpu_mask_voting
 
 from utils.image import resize, transform
 
+(CV2_MAJOR, CV2_MINOR, _) = cv2.__version__.split(".")
+CV2_MAJOR = int(CV2_MAJOR)
+CV2_MINOR = int(CV2_MINOR)
+
 class DataBatchWrapper(object):
 
     def __init__(self, target_size, max_size, image_stride, pixel_means, data_names = ['data', 'im_info'], label_names = []):
@@ -138,7 +142,10 @@ def reformat_data(dets, masks, classes):
             # find mask contours
             m = pred_mask.astype(np.uint8)
             m[m==1] *= 255
-            cnt, _ = cv2.findContours(m,cv2.RETR_TREE,cv2.CHAIN_APPROX_SIMPLE)
+            if CV2_MAJOR != 3:
+                cnt, _ = cv2.findContours(m,cv2.RETR_TREE,cv2.CHAIN_APPROX_SIMPLE)
+            else:
+                _, cnt, _ = cv2.findContours(m,cv2.RETR_TREE,cv2.CHAIN_APPROX_SIMPLE)
             cnt = cnt[0]
             cnt += pred_box[:2]
 
