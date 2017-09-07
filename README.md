@@ -16,7 +16,7 @@ The imagenet pretrained model is located at drml@10.0.8.239:~/Documents/vincent/
 	cd $(FCIS);
 	sudo ln -s /usr/lib /usr/lib64;
 	sh ./init.sh;
-	scp -r drml@10.0.8.239:~/Downloads/mxnet $(MXNET);
+	scp -r drml@10.0.9.33:~/Downloads/mxnet $(MXNET);
 	cp -r $(FCIS)/fcis/operator_cxx/* $(MXNET)/src/operator/contrib/
 	cd $(MXNET); 
 	make -j $(nproc) USE_OPENCV=0 USE_BLAS=openblas USE_CUDA=1 USE_CUDA_PATH=/usr/ USE_CUDNN=1;
