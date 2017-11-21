@@ -2,8 +2,8 @@
 MXNET_VERSION: "mxnet"
 output_path: "./output/fcis/labelme_box_envelope"
 symbol: resnet_v1_101_fcis
-gpus: '0'
-CLASS_AGNOSTIC: true
+gpus: '0,1,2'
+CLASS_AGNOSTIC: false
 SCALES:
 - 600
 - 1000
@@ -54,23 +54,23 @@ dataset:
   CLASSES: ['box','envelope']
   NUM_CLASSES: 3
   dataset: 'labelme'
-  dataset_path: "/home/vincent/Downloads/LabelMe"
-  image_set: 'singulation2'
+  dataset_path: "/home/drml/LabelMe"
+  image_set: 'singulation'
   root_path: "./data"
-#  test_image_set: test-dev2015
+  test_image_set: "singulation_test_resized"
   proposal: rpn
 TRAIN:
-  lr: 0.0005
-  lr_step: '14'
+  lr: 0.00005
+  lr_step: '16'
   warmup: false
   warmup_lr: 0.00005
   # typically we will use 4000 warmup step for single GPU
   warmup_step: 0
-  begin_epoch: 0
-  end_epoch: 10
-  model_prefix: 'e2e'
+  begin_epoch: 15
+  end_epoch: 25
+  model_prefix: 'e2e-no-agn'
   # whether resume training
-  RESUME: false
+  RESUME: true
   # whether flip image
   FLIP: true
   # whether shuffle image
@@ -85,7 +85,7 @@ TRAIN:
   ASPECT_GROUPING: true
   # R-CNN
   # rcnn rois batch size
-  BATCH_ROIS: 128
+  BATCH_ROIS: 256
   BATCH_ROIS_OHEM: 128
   # rcnn rois sampling params
   FG_FRACTION: 0.25
@@ -138,7 +138,7 @@ TRAIN:
   LOSS_WEIGHT: 
   - 1.0
   - 10.0
-  - 1.0
+  - 5.0
   CONVNEW3: true
 TEST:
   # use rpn to generate proposal

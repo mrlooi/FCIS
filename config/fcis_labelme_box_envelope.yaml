@@ -1,6 +1,6 @@
 ---
 MXNET_VERSION: "mxnet"
-output_path: "./output/fcis/voc"
+output_path: "./output/fcis/labelme_box_envelope"
 symbol: resnet_v1_101_fcis
 gpus: '0'
 CLASS_AGNOSTIC: true
@@ -45,41 +45,38 @@ network:
   - 1
   - 2
   ANCHOR_SCALES:
+  - 4
   - 8
   - 16
   - 32
-  NUM_ANCHORS: 9  
+  NUM_ANCHORS: 12
 dataset:
-  CLASSES: ['aeroplane', 'bicycle', 'bird', 'boat',
-            'bottle', 'bus', 'car', 'cat', 'chair',
-            'cow', 'diningtable', 'dog', 'horse',
-            'motorbike', 'person', 'pottedplant',
-            'sheep', 'sofa', 'train', 'tvmonitor']
-  NUM_CLASSES: 21
-  dataset: PascalVOC
-  dataset_path: "./data/VOCdevkit"
-  image_set: SDS_train
+  CLASSES: ['box','envelope']
+  NUM_CLASSES: 3
+  dataset: 'labelme'
+  dataset_path: "/home/vincent/LabelMe"
+  image_set: 'singulation'
   root_path: "./data"
-  test_image_set: SDS_val
+  test_image_set: 'singulation_test_resized'
   proposal: rpn
 TRAIN:
-  lr: 0.0005
-  lr_step: '14'
+  lr: 0.00005
+  lr_step: '16'
   warmup: false
   warmup_lr: 0.00005
   # typically we will use 4000 warmup step for single GPU
   warmup_step: 0
-  begin_epoch: 0
-  end_epoch: 22
+  begin_epoch: 14
+  end_epoch: 20
   model_prefix: 'e2e'
   # whether resume training
-  RESUME: false
+  RESUME: true
   # whether flip image
   FLIP: true
   # whether shuffle image
   SHUFFLE: true
   # whether use OHEM
-  ENABLE_OHEM: false
+  ENABLE_OHEM: true
   # size of images for each device, 2 for rcnn, 1 for rpn and e2e
   BATCH_IMAGES: 1
   # e2e changes behavior of anchor loader and metric
@@ -161,7 +158,7 @@ TEST:
   PROPOSAL_MIN_SIZE: 16
   # RCNN nms
   NMS: 0.3
-  test_epoch: 21
+  # test_epoch: 20
   # ITER 2 & mask merge
   ITER: 2
   MIN_DROP_SIZE: 16
