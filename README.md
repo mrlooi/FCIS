@@ -1,30 +1,25 @@
 ## NOTE: THIS IS A MODIFIED REPO OF https://github.com/msracver/FCIS
 
 
-### Installation on Debian
+### Installation on Debian 9.0 (Dorabot version)
+Note that this installation is entirely dependent on the current Dorabot Debian 9.0 setup environment (see http://pha.dorabot.com/w/setup_software_development_environment/) and purely customized for Dorabot usage. It is not guaranteed to work in a different environment setup.
+Assumes CUDA (cuda 8) and CUDNN are installed in /usr, as in the environment installation script
+
 1. Python prerequisites:
 	```
-	sudo apt-get install libopenblas-dev
-	sudo apt-get install python-h5py
-	sudo pip install Cython
-	sudo pip install easydict
-	sudo pip install hickle
+	sudo apt-get install libopenblas-dev python-h5py
+	sudo pip install Cython easydict hickle
 	```
-2. Custom installation (for Dorabot -> must have cuda 8 installed)
-	Assumes CUDA and CUDNN are installed in /usr, as per DD's environment installation script
-	```
-	sudo ln -s /usr/lib /usr/lib64;
-	
-	scp -r drml@10.0.9.33:~/Downloads/mxnet $(MXNET);
-	scp -r drml@10.0.9.33:~/Downloads/FCIS/lib $(FCIS);
-	
-	cd $(FCIS);
+2. Softlink /usr/lib64 (if it doesn't exist already)
+    ```
+    sudo ln -s /usr/lib /usr/lib64;
+    ```
+3. Install mxnet fork (http://gitlab.dorabot.com/vincent/mxnet_debian/)
+4. Download pre-built FCIS library binaries 
+    ```
+    scp -r drml@10.0.9.33:~/Downloads/FCIS/lib $(your_fcis_folder_root);
+    ```
+5. Build FCIS!
+    ```
 	sh ./init.sh;
-
-	cp -r $(FCIS)/fcis/operator_cxx/* $(MXNET)/src/operator/contrib/
-	cd $(MXNET); 
-	make -j $(nproc) USE_OPENCV=0 USE_BLAS=openblas USE_CUDA=1 USE_CUDA_PATH=/usr/ USE_CUDNN=1;
-	cd python;
-	sudo python setup.py install;
-
 	```
