@@ -37,8 +37,5 @@ Assumes CUDA (cuda 8) and CUDNN are installed in /usr, as in the environment ins
     ```
 
 ### Using with ROS
-The
-
-
-Training
+The relevant ROS files are in the 'ros' folder. Place the 'msg', 'srv' and 'include' files in your catkin project. Example Ros C++ code for retrieving the data can be found in the 'ros/test' folder. 
 
