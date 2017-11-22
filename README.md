@@ -19,7 +19,8 @@ Assumes CUDA (cuda 8) and CUDNN are installed in /usr, as in the environment ins
     ```
     scp -r drml@10.0.9.33:~/Downloads/FCIS/lib $(your_fcis_folder_root);
     ```
-5. Build FCIS!
+5. Build FCIS libs
     ```
 	sh ./init.sh;
 	```
+
