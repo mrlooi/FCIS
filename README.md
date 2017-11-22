@@ -15,7 +15,7 @@ Assumes CUDA (cuda 8) and CUDNN are installed in /usr, as in the environment ins
     sudo ln -s /usr/lib /usr/lib64;
     ```
 3. Install mxnet fork (http://gitlab.dorabot.com/vincent/mxnet_debian/)
-4. Download pre-compiled FCIS library .so files from our server (ask anyone in the vision team for the server password)
+4. Download pre-compiled FCIS library .so files from our server (ask the vision team for the server password)
     ```
     scp -r drml@10.0.9.33:~/Downloads/FCIS/lib $(your_fcis_folder_root);
     ```
@@ -23,4 +23,22 @@ Assumes CUDA (cuda 8) and CUDNN are installed in /usr, as in the environment ins
     ```
 	sh ./init.sh;
 	```
+
+
+### Running a demo (example: sorting)
+1. Download the pretrained model for sorting from our server (ask the vision team for the server password).
+    The pretrained model for sorting is named "dora-box-envelope-0008.params" (Unless you know what you are doing, do not rename it)
+    ```
+    scp -r drml@10.0.9.33:~/Downloads/FCIS/model/dora-box-envelope-0008.params model/
+    ```
+2. Run the demo! 
+    ```
+    python ./fcis/demo.py --cfg ./config/dora_box_envelope.yaml --model ./model/dora-box-envelope-0008.params --img_dir ./data
+    ```
+
+### Using with ROS
+The
+
+
+Training
 
