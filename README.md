@@ -38,4 +38,6 @@ Assumes CUDA (cuda 8) and CUDNN are installed in /usr, as in the environment ins
 
 ### Using with ROS
 The relevant ROS files are in the 'ros' folder. Place the 'msg', 'srv' and 'include' files in your catkin project. Example Ros C++ code for retrieving the data can be found in the 'ros/test' folder. 
-
+    ```
+    python ./fcis/ros_demo.py --cfg ./config/dora_box_envelope.yaml --model ./model/dora-box-envelope-0008.params [--publish]
+    ```
