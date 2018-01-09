@@ -27,7 +27,7 @@ Assumes CUDA (cuda 8) and CUDNN are installed in /usr, as in the environment ins
 
 ### Running a demo
 1. You will need 2 files to run the network: config file and model file. 
-Download the pretrained model and config from our RW server (RW/Vision/FCIS/<project>, where <project> is currently 'loading' or 'sorting')
+Download the pretrained model and config from our RW server (RW/Vision/FCIS/project, where 'project' is currently 'loading' or 'sorting')
 2. Run the demo! 
     ```
     python ./fcis/demo.py --cfg <config_file> --model <model_file> --img_dir ./data
