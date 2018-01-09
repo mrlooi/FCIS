@@ -25,19 +25,16 @@ Assumes CUDA (cuda 8) and CUDNN are installed in /usr, as in the environment ins
 	```
 
 
-### Running a demo (example: sorting)
-1. Download the pretrained model for sorting from our server (ask the vision team for the server password).
-    The pretrained model for sorting is named "dora-box-envelope-0008.params" (Unless you know what you are doing, do not rename it)
-    ```
-    scp -r drml@10.0.9.33:~/Downloads/FCIS/model/dora-box-envelope-0008.params model/
-    ```
+### Running a demo
+1. You will need 2 files to run the network: config file and model file. 
+Download the pretrained model and config from our RW server (RW/Vision/FCIS/<project>, where <project> is currently 'loading' or 'sorting')
 2. Run the demo! 
     ```
-    python ./fcis/demo.py --cfg ./config/dora_box_envelope.yaml --model ./model/dora-box-envelope-0008.params --img_dir ./data
+    python ./fcis/demo.py --cfg <config_file> --model <model_file> --img_dir ./data
     ```
 
 ### Using with ROS
 The relevant ROS files are in the 'ros' folder. Place the 'msg', 'srv' and 'include' files in your catkin project. Example Ros C++ code for retrieving the data can be found in the 'ros/test' folder. 
     ```
-    python ./fcis/ros_demo.py --cfg ./config/dora_box_envelope.yaml --model ./model/dora-box-envelope-0008.params [--publish]
+    python ./fcis/ros_demo.py --cfg <config_file> --model <model_file> [--publish]
     ```
