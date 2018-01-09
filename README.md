@@ -15,9 +15,9 @@ Assumes CUDA (cuda 8) and CUDNN are installed in /usr, as in the environment ins
     sudo ln -s /usr/lib /usr/lib64;
     ```
 3. Install mxnet fork (http://gitlab.dorabot.com/vincent/mxnet_debian/)
-4. Download pre-compiled FCIS library .so files from our server (ask the vision team for the server password)
+4. Download pre-compiled FCIS library .so files from our RW server (inside RW/Vision/FCIS/precompiled/lib). Copy the 'lib' folder into this repository. This replaces the default 'lib' folder
     ```
-    scp -r drml@10.0.9.33:~/Downloads/FCIS/lib $(your_fcis_folder_root);
+    scp -r RW/Vision/FCIS/precompiled/lib $(your_fcis_folder_root);
     ```
 5. Build FCIS libs
     ```
