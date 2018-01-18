@@ -55,4 +55,5 @@ def show_masks(im, detections, masks, class_names, binary_thresh=0.4, scale=1.0,
     plt.imshow(im)
     if show:
         plt.show()
+    im = cv2.cvtColor(im, cv2.COLOR_RGB2BGR)
     return im

@@ -8,7 +8,7 @@ Assumes CUDA (cuda 8) and CUDNN are installed in /usr, as in the environment ins
 1. Python prerequisites:
 	```
 	sudo apt-get install libopenblas-dev python-h5py
-	sudo pip install Cython easydict hickle
+	sudo pip install Cython easydict hickle natsort
 	```
 2. Softlink /usr/lib64 (if it doesn't exist already)
     ```

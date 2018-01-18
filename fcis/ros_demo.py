@@ -7,36 +7,19 @@
 
 import _init_paths
 
-import argparse
-import os
 import os.path as osp
-import glob
-import sys
-import logging
-import pprint
+# import sys
+# import logging
 import random
 import cv2
 import numpy as np
+
 # get config
-
 from config.config import config, update_config
-cur_path = os.path.abspath(os.path.dirname(__file__))
 
-sys.path.append(".")
-# sys.path.insert(0, os.path.join(cur_path, '../external/mxnet', config.MXNET_VERSION))
-
-import mxnet as mx
-print("using mxnet at %s"%(mx.__file__))
-from core.tester import im_detect, Predictor
-from symbols import *
-from utils.load_model import load_param, load_param_file
-from utils.show_masks import show_masks
 from utils.tictoc import tic, toc
-from nms.nms import py_nms_wrapper
-from mask.mask_transform import gpu_mask_voting, cpu_mask_voting
 
-from utils.image import resize, transform
-from demo import DataBatchWrapper, inference, reformat_data
+from demo import FCISNet, reformat_data
 
 # ros stuff
 import rospy
@@ -47,52 +30,48 @@ from cv_bridge import CvBridge, CvBridgeError
 from vision.srv import _Detection2
 from vision.msg import DetectionData
 
+KINECT_TOPIC = "/kinect2/hd/image_color"
+
 RED = (0,0,255)
 
-def normalize_luminance(img):
-    # convert to YUV colorspace to normalize luminance by performing hist equalization on Y channel
-    image_yuv = cv2.cvtColor(img, cv2.COLOR_BGR2YUV)
-    image_yuv[:, :, 0] = cv2.equalizeHist(image_yuv[:, :, 0]) 
+# def normalize_luminance(img):
+#     # convert to YUV colorspace to normalize luminance by performing hist equalization on Y channel
+#     image_yuv = cv2.cvtColor(img, cv2.COLOR_BGR2YUV)
+#     image_yuv[:, :, 0] = cv2.equalizeHist(image_yuv[:, :, 0]) 
 
-    # convert YUV back to RGB
-    image = cv2.cvtColor(image_yuv, cv2.COLOR_YUV2BGR)
+#     # convert YUV back to RGB
+#     image = cv2.cvtColor(image_yuv, cv2.COLOR_YUV2BGR)
 
-    return image
+#     return image
 
 class RosFCISPredictor(object):
-    def __init__(self, predictor, data_batch_wrapper, classes, min_score=0.85, publish=False, ctx_id=[0]):
-        if type(ctx_id) != list:
-            ctx_id = [ctx_id]
-        self.ctx_id = ctx_id
+    def __init__(self, net, min_score=0.85, publish=False):
         self.min_score = min_score
         self.publish = publish
 
-        self.bridge = CvBridge()
+        self.net = net
 
         # class
-        self.classes = classes
+        self.classes = net.classes
         self.classes_color = [(random.randint(0,255),random.randint(0,255),random.randint(0,255)) for c in self.classes]
-        
-        self.image_sub = rospy.Subscriber("/kinect2/hd/image_color",Image, self.callback)
 
-        ros_node_extension = '_'.join([c for c in classes if c.lower() != "__background__"])
+        # data 
+        self.current_cv_image = None
+        self.current_detection_items = []
+
+        print("RosFCISPredictor is running. Target classes: %s. Using min score of %.3f..."%(self.classes, self.min_score))
+
+    def init_ros_nodes(self):
+        self.bridge = CvBridge()
+
+        self.image_sub = rospy.Subscriber(KINECT_TOPIC, Image, self.callback)
+
+        ros_node_extension = '_'.join([c for c in self.classes if c.lower() != "__background__"])
         if self.publish:
             self.image_pub = rospy.Publisher("/kinect2/hd/image_mask_%s"%(ros_node_extension),Image,queue_size=5)
 
         # service 
         self.image_service = rospy.Service('/kinect2/hd/mask_service_%s'%(ros_node_extension), _Detection2.Detection2, self.callback_service)
-        self.current_cv_image = None
-
-        # model
-        self.predictor = predictor
-
-        # data batch wrapper
-        self.data_batch_wr = data_batch_wrapper
-
-        # data 
-        self.current_detection_items = []
-
-        print("RosFCISPredictor is running. Target classes: %s. Using min score of %.3f..."%(self.classes, self.min_score))
 
     def callback(self, data):
         try:
@@ -143,12 +122,12 @@ class RosFCISPredictor(object):
 
         return _Detection2.Detection2Response(detection_items)
 
-    def inference(self, im):
-        data_batch = self.data_batch_wr.get_data_batch(im)
-
+    def inference(self, im, debug=True):
         tic()
-        dets, masks = inference(self.predictor, data_batch, self.data_batch_wr.data_names, len(self.classes), BINARY_THRESH=config.BINARY_THRESH, CONF_THRESH=self.min_score, gpu_id=self.ctx_id[0])
-        print('inference time: {:.4f}s'.format(toc()))
+        dets, masks = self.net.forward(im, conf_thresh=self.min_score)
+        
+        if debug:
+            print('inference time: {:.4f}s'.format(toc()))
 
         data = reformat_data(dets, masks, self.classes)
         return data
@@ -172,7 +151,11 @@ class RosFCISPredictor(object):
         return det_data
         # return [DetectionData(type=cls,score=d['score'],bbox=[1204, 100, 1408, 328],contours=list(d['contours'])) for cls, cls_data in detection_data.items() for d in cls_data if len(d['bbox']) == 4]
 
-def parse_args():
+
+# cur_path + '/../experiments/fcis/cfgs/fcis_coco_demo.yaml'
+def main():
+    import argparse
+
     """Parse input arguments."""
     parser = argparse.ArgumentParser(description='FCIS ROS demo')
     parser.add_argument('--cfg', dest='cfg_file', help='required config file (YAML file)', 
@@ -187,67 +170,16 @@ def parse_args():
 
     args = parser.parse_args()
 
-    return args
-
-# cur_path + '/../experiments/fcis/cfgs/fcis_coco_demo.yaml'
-def main():
-    args = parse_args()
-
-    # load config
     cfg_path = args.cfg_file
-    assert osp.exists(cfg_path), ("Could not find config file %s"%(cfg_path))
-    update_config(cfg_path)
-    print("\nLoaded config %s\n"%(cfg_path))
-    # pprint.pprint(config)
-
-    # set up class names
-    CLASSES = config.dataset.CLASSES
-    num_classes = len(CLASSES)
-
-    # load model
     model_path = args.model
-    if '.params' not in model_path:
-        model_path += ".params"
-    assert osp.exists(model_path), ("Could not find model path %s"%(model_path))
-    arg_params, aux_params = load_param_file(model_path, process=True)
-    print("\nLoaded model %s\n"%(model_path))
 
-    # get symbol
-    ctx_id = [int(i) for i in config.gpus.split(',')]
-    sym_instance = eval(config.symbol)()
-    sym = sym_instance.get_symbol(config, is_train=False)
-
-
-    # key parameters
-    data_names = ['data', 'im_info']
-    label_names = []
-    max_data_shape = [[('data', (1, 3, max([v[0] for v in config.SCALES]), max([v[1] for v in config.SCALES])))]]
-
-    target_size = config.SCALES[0][0]
-    max_size = config.SCALES[0][1]
-
-    data_batch_wr = DataBatchWrapper(target_size, max_size, image_stride=config.network.IMAGE_STRIDE, 
-                          pixel_means=config.network.PIXEL_MEANS, data_names=data_names, label_names=label_names)
-
-    im = np.zeros((target_size,max_size,3))
-    data_tensor_info = data_batch_wr.get_data_tensor_info(im)
-
-    # get predictor
-    predictor = Predictor(sym, data_names, label_names,
-                          context=[mx.gpu(ctx_id[0])], max_data_shapes=max_data_shape,
-                          provide_data=[[(k, v.shape) for k, v in zip(data_names, data_tensor_info)]], provide_label=[None],
-                          arg_params=arg_params, aux_params=aux_params)
-
-    # # warm up predictor
-    for i in xrange(2):
-        data_batch = mx.io.DataBatch(data=[data_tensor_info], label=[], pad=0, index=0,
-                                     provide_data=[[(k, v.shape) for k, v in zip(data_names, data_tensor_info)]],
-                                     provide_label=[None])
-        scales = [data_batch.data[i][1].asnumpy()[0, 2] for i in xrange(len(data_batch.data))]
-        _, _, _, _ = im_detect(predictor, data_batch, data_names, scales, config)
+    # load net
+    fcis_net = FCISNet(cfg_path, model_path)
+    CLASSES = fcis_net.classes
 
     # init ros mask predictor
-    ros_predictor = RosFCISPredictor(predictor, data_batch_wr, CLASSES, publish=args.publish)
+    ros_predictor = RosFCISPredictor(fcis_net, publish=args.publish)
+    ros_predictor.init_ros_nodes()
     rospy.init_node('fcis_predictor', anonymous=True)
     try:
         rospy.spin()

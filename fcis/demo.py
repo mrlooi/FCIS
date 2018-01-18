@@ -7,33 +7,34 @@
 
 import _init_paths
 
-import argparse
-import os
+# import os
 import os.path as osp
 import glob
 import sys
-import logging
-import pprint
+# import logging
+# import pprint
 import cv2
 import numpy as np
 import json
+from natsort import natsorted as nts
 
 # get config
 
 from config.config import config, update_config
-cur_path = os.path.abspath(os.path.dirname(__file__))
+# cur_path = os.path.abspath(os.path.dirname(__file__))
 
-sys.path.append(".")
+# sys.path.append(".")
 # sys.path.insert(0, os.path.join(cur_path, '../external/mxnet', config.MXNET_VERSION))
 
 import mxnet as mx
 print("using mxnet at %s"%(mx.__file__))
 from core.tester import im_detect, Predictor
-from symbols import *
+from symbols import resnet_v1_101_fcis
 from utils.load_model import load_param, load_param_file
 from utils.show_masks import show_masks
 from utils.tictoc import tic, toc
 from nms.nms import py_nms_wrapper
+from bbox.bbox_transform import clip_boxes
 from mask.mask_transform import gpu_mask_voting, cpu_mask_voting
 
 from utils.image import resize, transform
@@ -68,6 +69,76 @@ class DataBatchWrapper(object):
                                              provide_data=[[(k, v.shape) for k, v in zip(self.data_names, data_tensor_info)]],
                                              provide_label=[None])
         return data_batch
+
+class FCISNet(object):
+    def __init__(self, cfg_path, model_path):
+
+        # load config
+        assert osp.exists(cfg_path), ("Could not find config file %s"%(cfg_path))
+        update_config(cfg_path)
+
+        self.cfg = config
+
+        # load model
+        if '.params' not in model_path:
+            model_path += ".params"
+        assert osp.exists(model_path), ("Could not find model path %s"%(model_path))
+        self.model_path = model_path
+
+        self.net = None
+        self.data_batch_wr = None
+
+        # config params
+        self.classes = self.cfg.dataset.CLASSES
+        self.num_classes = len(self.classes)
+        self.ctx_id = [int(i) for i in self.cfg.gpus.split(',')]
+
+        self.init_net()
+
+    def init_net(self):
+        config = self.cfg
+
+        # get symbol
+        sym_instance = resnet_v1_101_fcis()
+        sym = sym_instance.get_symbol(config, is_train=False)
+
+        # key parameters
+        data_names = ['data', 'im_info']
+        label_names = []
+        max_data_shape = [[('data', (1, 3, max([v[0] for v in config.SCALES]), max([v[1] for v in config.SCALES])))]]
+
+        target_size = config.SCALES[0][0]
+        max_size = config.SCALES[0][1]
+
+        self.data_batch_wr = DataBatchWrapper(target_size, max_size, image_stride=config.network.IMAGE_STRIDE, 
+                              pixel_means=config.network.PIXEL_MEANS, data_names=data_names, label_names=label_names)
+
+        im = np.zeros((target_size,max_size,3))
+        data_tensor_info = self.data_batch_wr.get_data_tensor_info(im)
+
+        # get predictor
+        arg_params, aux_params = load_param_file(self.model_path, process=True)
+        print("\nLoaded model %s\n"%(self.model_path))
+
+        self.net = Predictor(sym, data_names, label_names,
+                              context=[mx.gpu(self.ctx_id[0])], max_data_shapes=max_data_shape,
+                              provide_data=[[(k, v.shape) for k, v in zip(data_names, data_tensor_info)]], provide_label=[None],
+                              arg_params=arg_params, aux_params=aux_params)
+        self.data_names = data_names
+
+        # # warm up predictor
+        for i in xrange(2):
+            data_batch = self.data_batch_wr.get_data_batch(im)
+            scales = [data_batch.data[i][1].asnumpy()[0, 2] for i in xrange(len(data_batch.data))]
+            _, _, _, _ = im_detect(self.net, data_batch, data_names, scales, config)
+
+    def forward(self, im, conf_thresh = 0.7):
+        data_batch = self.data_batch_wr.get_data_batch(im)
+
+        dets, masks = inference(self.net, data_batch, self.data_names, self.num_classes, self.cfg.BINARY_THRESH, conf_thresh, gpu_id=self.ctx_id[0])
+
+        return dets, masks
+
 
 def inference(predictor, data_batch, data_names, num_classes, BINARY_THRESH = 0.4, CONF_THRESH=0.7, gpu_id=0):
     scales = [data_batch.data[i][1].asnumpy()[0, 2] for i in xrange(len(data_batch.data))]
@@ -142,10 +213,9 @@ def reformat_data(dets, masks, classes):
             # find mask contours
             m = pred_mask.astype(np.uint8)
             m[m==1] *= 255
-            if CV2_MAJOR != 3:
-                cnt, _ = cv2.findContours(m,cv2.RETR_TREE,cv2.CHAIN_APPROX_SIMPLE)
-            else:
-                _, cnt, _ = cv2.findContours(m,cv2.RETR_TREE,cv2.CHAIN_APPROX_SIMPLE)
+
+            cnt = cv2.findContours(m,cv2.RETR_TREE,cv2.CHAIN_APPROX_SIMPLE)
+            cnt = cnt[0] if CV2_MAJOR != 3 else cnt[1]
             cnt = cnt[0]
             cnt += pred_box[:2]
 
@@ -171,7 +241,10 @@ def write_reformat_data_json(reformatted_data, json_path):
         json.dump(data, f)
     print("Saved to %s"%(json_path))
 
-def parse_args():
+
+def main():
+    import argparse
+
     """Parse input arguments."""
     parser = argparse.ArgumentParser(description='FCIS demo')
     parser.add_argument('--cfg', dest='cfg_file', help='required config file (YAML file)', 
@@ -186,77 +259,27 @@ def parse_args():
                          action='store_true')
     parser.add_argument('--novis', dest='novis', help='Turn off visualization of inference',
                          action='store_true')
+    parser.add_argument('--wait', dest='wait', help='Set the wait time in between frames in opencv waitKey() (default 0 i.e. pause until button pressed)',
+                         default=0, type=int)
 
     args = parser.parse_args()
-
-    return args
-
-# cur_path + '/../experiments/fcis/cfgs/fcis_coco_demo.yaml'
-def main():
-    args = parse_args()
 
     # load image demo directory
     img_dir = args.img_dir
     assert osp.exists(img_dir), ("Could not find image directory %s"%(img_dir))
 
-    image_names = glob.glob(osp.join(img_dir,"*"))
+    image_names = nts(glob.glob(osp.join(img_dir,"*")))
 
     if len(image_names) == 0:
         print("No files in %s"%(img_dir))
         return
 
-    # load config
     cfg_path = args.cfg_file
-    assert osp.exists(cfg_path), ("Could not find config file %s"%(cfg_path))
-    update_config(cfg_path)
-    print("\nLoaded config %s\n"%(cfg_path))
-    # pprint.pprint(config)
-
-    # set up class names
-    CLASSES = config.dataset.CLASSES
-    num_classes = len(CLASSES)
-
-    # load model
     model_path = args.model
-    if '.params' not in model_path:
-        model_path += ".params"
-    assert osp.exists(model_path), ("Could not find model path %s"%(model_path))
-    arg_params, aux_params = load_param_file(model_path, process=True)
-    print("\nLoaded model %s\n"%(model_path))
 
-    # get symbol
-    ctx_id = [int(i) for i in config.gpus.split(',')]
-    sym_instance = eval(config.symbol)()
-    sym = sym_instance.get_symbol(config, is_train=False)
-
-
-    # key parameters
-    data_names = ['data', 'im_info']
-    label_names = []
-    max_data_shape = [[('data', (1, 3, max([v[0] for v in config.SCALES]), max([v[1] for v in config.SCALES])))]]
-
-    target_size = config.SCALES[0][0]
-    max_size = config.SCALES[0][1]
-
-    data_batch_wr = DataBatchWrapper(target_size, max_size, image_stride=config.network.IMAGE_STRIDE, 
-                          pixel_means=config.network.PIXEL_MEANS, data_names=data_names, label_names=label_names)
-
-    im = np.zeros((target_size,max_size,3))
-    data_tensor_info = data_batch_wr.get_data_tensor_info(im)
-
-    # get predictor
-    predictor = Predictor(sym, data_names, label_names,
-                          context=[mx.gpu(ctx_id[0])], max_data_shapes=max_data_shape,
-                          provide_data=[[(k, v.shape) for k, v in zip(data_names, data_tensor_info)]], provide_label=[None],
-                          arg_params=arg_params, aux_params=aux_params)
-
-    # # warm up predictor
-    for i in xrange(2):
-        data_batch = mx.io.DataBatch(data=[data_tensor_info], label=[], pad=0, index=0,
-                                     provide_data=[[(k, v.shape) for k, v in zip(data_names, data_tensor_info)]],
-                                     provide_label=[None])
-        scales = [data_batch.data[i][1].asnumpy()[0, 2] for i in xrange(len(data_batch.data))]
-        _, _, _, _ = im_detect(predictor, data_batch, data_names, scales, config)
+    # load net
+    fcis_net = FCISNet(cfg_path, model_path)
+    CLASSES = fcis_net.classes
 
     # test: run predictions
     CONF_THRESH = args.min_score
@@ -269,24 +292,23 @@ def main():
             continue
         # im_copy = im.copy()
         
-        data_batch = data_batch_wr.get_data_batch(im)
-
         tic()
-        dets, masks = inference(predictor, data_batch, data_names, num_classes, config.BINARY_THRESH, CONF_THRESH, gpu_id=ctx_id[0])
-        print('inference time {:s}: {:.4f}s'.format(im_name, toc()))
-        # im = cv2.imread(im_name)
-
-
-        reformatted_data = reformat_data(dets, masks, CLASSES)
+        dets, masks = fcis_net.forward(im, conf_thresh=CONF_THRESH)
+        print('inference time %s: %.4fs'%(im_name, toc()))
 
         if args.save:
             im_name_basename = im_name[:im_name.rfind('.')]
             json_file = osp.join(img_dir, im_name_basename + ".json")
+            reformatted_data = reformat_data(dets, masks, CLASSES)
             write_reformat_data_json(reformatted_data, json_file)
 
         # vis
         if not args.novis:
-            show_masks(im, dets, masks, CLASSES, config.BINARY_THRESH)
+            plt_show = args.wait == 0 
+            im_seg = show_masks(im, dets, masks, CLASSES, config.BINARY_THRESH, show=plt_show)
+            if not plt_show:
+                cv2.imshow("seg", im_seg)
+                cv2.waitKey(args.wait) 
 
     print('\nDONE\n')
 
