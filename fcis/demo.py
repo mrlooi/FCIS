@@ -6,6 +6,7 @@ import glob
 import sys
 # import logging
 # import pprint
+import random
 import cv2
 import numpy as np
 import json
@@ -35,6 +36,9 @@ from utils.image import resize, transform
 (CV2_MAJOR, CV2_MINOR, _) = cv2.__version__.split(".")
 CV2_MAJOR = int(CV2_MAJOR)
 CV2_MINOR = int(CV2_MINOR)
+
+def get_random_color():
+    return (random.randint(0,255),random.randint(0,255),random.randint(0,255))
 
 class DataBatchWrapper(object):
 
@@ -132,6 +136,43 @@ class FCISNet(object):
 
         return dets, masks
 
+
+class FCISBase(object):
+
+    def __init__(self, net, min_score=0.85):
+        self.min_score = min_score  
+        self.net = net      
+
+        # class
+        self.classes = net.classes
+        self.classes_color = [get_random_color() for c in self.classes]
+
+    def draw_segmentation(self, img, data):
+        img_copy = img.copy()
+        for cls,cls_data in data.items():
+            cls_color = self.classes_color[self.classes.index(cls)]
+            for d in cls_data:
+                bbox = d['bbox']
+                if len(bbox) != 4:
+                    continue
+                cnt = d['contours']
+                score = d['score']
+                # self.current_max_bbox = bbox
+                bbox_top_pt = (int(bbox[0]),int(bbox[1]))
+                cv2.rectangle(img_copy, bbox_top_pt, (int(bbox[2]),int(bbox[3])), cls_color, 3)
+                cv2.putText(img_copy, "Score: %.3f, %s"%(score, cls), bbox_top_pt, cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0,0,255), 2)
+                cv2.drawContours(img_copy,[cnt],0,cls_color,2)
+        return img_copy
+
+    def inference(self, im, debug=True):
+        tic()
+        dets, masks = self.net.forward(im, conf_thresh=self.min_score)
+        
+        if debug:
+            print('inference time: {:.4f}s'.format(toc()))
+
+        data = reformat_data(dets, masks, self.classes)
+        return data
 
 def inference(predictor, data_batch, data_names, num_classes, BINARY_THRESH = 0.4, CONF_THRESH=0.7, gpu_id=0):
     scales = [data_batch.data[i][1].asnumpy()[0, 2] for i in xrange(len(data_batch.data))]
@@ -261,7 +302,7 @@ def main():
     img_dir = args.img_dir
     assert osp.exists(img_dir), ("Could not find image directory %s"%(img_dir))
 
-    image_names = nts(glob.glob(osp.join(img_dir,"*")))
+    image_names = nts(glob.glob(osp.join(img_dir,"*.jpg")))
 
     if len(image_names) == 0:
         print("No files in %s"%(img_dir))
@@ -296,9 +337,13 @@ def main():
             write_reformat_data_json(reformatted_data, json_file)
 
         # vis
+        im_out_file = "/home/vincent/hd/deep_learning/tmp/FCIS/%s"%(im_name.split("/")[-1])
         if not args.novis:
             plt_show = args.wait == 0 
             im_seg = show_masks(im, dets, masks, CLASSES, config.BINARY_THRESH, show=plt_show)
+            im_seg = cv2.resize(im_seg, (960,540))
+            cv2.imwrite(im_out_file,im_seg)
+            print("Saved to %s"%(im_out_file))
             if not plt_show:
                 cv2.imshow("seg", im_seg)
                 cv2.waitKey(args.wait) 

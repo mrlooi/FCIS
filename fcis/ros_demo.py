@@ -3,7 +3,6 @@ import _init_paths
 import os.path as osp
 # import sys
 # import logging
-import random
 import cv2
 import numpy as np
 
@@ -12,7 +11,7 @@ from config.config import config, update_config
 
 from utils.tictoc import tic, toc
 
-from demo import FCISNet, reformat_data
+from demo import FCISNet, FCISBase
 
 # ros stuff
 import rospy
@@ -25,8 +24,6 @@ from vision.msg import DetectionData
 
 KINECT_TOPIC = "/kinect2/hd/image_color"
 
-RED = (0,0,255)
-
 # def normalize_luminance(img):
 #     # convert to YUV colorspace to normalize luminance by performing hist equalization on Y channel
 #     image_yuv = cv2.cvtColor(img, cv2.COLOR_BGR2YUV)
@@ -36,25 +33,19 @@ RED = (0,0,255)
 #     image = cv2.cvtColor(image_yuv, cv2.COLOR_YUV2BGR)
 
 #     return image
-
-class RosFCISPredictor(object):
+              
+class RosFCISPredictor(FCISBase):
     def __init__(self, net, min_score=0.85, publish=False):
-        self.min_score = min_score
+        super(RosFCISPredictor, self).__init__(net, min_score=min_score)
         self.publish = publish
-
-        self.net = net
-
-        # class
-        self.classes = net.classes
-        self.classes_color = [(random.randint(0,255),random.randint(0,255),random.randint(0,255)) for c in self.classes]
-
-        # data 
-        self.current_cv_image = None
-        self.current_detection_items = []
 
         print("RosFCISPredictor is running. Target classes: %s. Using min score of %.3f..."%(self.classes, self.min_score))
 
     def init_ros_nodes(self):
+        # data 
+        self.current_cv_image = None
+        self.current_detection_items = []
+
         self.bridge = CvBridge()
 
         self.image_sub = rospy.Subscriber(KINECT_TOPIC, Image, self.callback)
@@ -73,34 +64,19 @@ class RosFCISPredictor(object):
         except CvBridgeError as e:
             print(e)
 
-
         if self.publish:
-            data = self.inference(self.current_cv_image)
-            self.current_detection_items = self._format_detection_response(data)
+            inf_data = self.inference(self.current_cv_image)
+            self.current_detection_items = self._format_detection_response(inf_data)
 
             # max_scores = 
             try:
-                img_copy = self.current_cv_image.copy()
-                for cls,cls_data in data.items():
-                    cls_color = self.classes_color[self.classes.index(cls)]
-                    for d in cls_data:
-                        bbox = d['bbox']
-                        if len(bbox) != 4:
-                            continue
-                        cnt = d['contours']
-                        score = d['score']
-                        # self.current_max_bbox = bbox
-                        bbox_top_pt = (int(bbox[0]),int(bbox[1]))
-                        cv2.rectangle(img_copy, bbox_top_pt, (int(bbox[2]),int(bbox[3])), cls_color, 3)
-                        cv2.putText(img_copy, "Score: %.3f, %s"%(score, cls), bbox_top_pt, cv2.FONT_HERSHEY_SIMPLEX, 0.8, RED, 2)
-                        cv2.drawContours(img_copy,[cnt],0,cls_color,2)
+                img_copy = self.draw_segmentation(self.current_cv_image, inf_data)
                 self.image_pub.publish(self.bridge.cv2_to_imgmsg(img_copy, "bgr8"))
                 cv2.imshow("bounding boxes", img_copy)
                 cv2.waitKey(1)
             except CvBridgeError as e:
                 print("[ERROR] CvBridgeError: %s"%e)
 
-        
     def callback_service(self, req):
         detection_items = []
         if self.current_cv_image is None:
@@ -115,16 +91,6 @@ class RosFCISPredictor(object):
 
         return _Detection2.Detection2Response(detection_items)
 
-    def inference(self, im, debug=True):
-        tic()
-        dets, masks = self.net.forward(im, conf_thresh=self.min_score)
-        
-        if debug:
-            print('inference time: {:.4f}s'.format(toc()))
-
-        data = reformat_data(dets, masks, self.classes)
-        return data
-
     def _format_detection_response(self, detection_data):
         # sorted_idx = np.argsort(scores[cls])  # already sorted!
         # print(list(detection_data['envelope'][0]['bbox']))
@@ -136,6 +102,8 @@ class RosFCISPredictor(object):
                 if len(bbox) != 4:
                     continue     
                 cnt = d['contours'].squeeze()
+                if len(cnt.shape) < 2:
+                    continue
                 # print(cnt.shape)
                 # bbox = list(bbox)
                 cnt = cnt.reshape(cnt.shape[0]*cnt.shape[1])
@@ -168,7 +136,6 @@ def main():
 
     # load net
     fcis_net = FCISNet(cfg_path, model_path)
-    CLASSES = fcis_net.classes
 
     # init ros mask predictor
     ros_predictor = RosFCISPredictor(fcis_net, publish=args.publish)
